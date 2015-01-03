@@ -6,15 +6,17 @@ The goal of the vc4asm project is a **full featured
         macro assembler** and disassembler with **constraint checking**. A
       simulator for debugging purposes is planned.
 
-      The work is based on [qpu-asm
-        from Pete Warden](https://github.com/jetpacapp/qpu-asm) which itself is based on [Eman's
-        work](https://github.com/elorimer/rpi-playground/tree/master/QPU/assembler) and some ideas also taken from [<span
-          class="vcard-fullname" itemprop="name">Herman H Hermitage</span>](https://github.com/hermanhermitage/videocoreiv-qpu).
-      But it goes further by far. First of all it supports macros and functions.
+The work is based on [qpu-asm from Pete
+Warden](https://github.com/jetpacapp/qpu-asm) which itself is based on [Eman's
+work](https://github.com/elorimer/rpi-playground/tree/master/QPU/assembler) and
+some ideas also taken from [Herman H
+Hermitage](https://github.com/hermanhermitage/videocoreiv-qpu).  But it goes
+further by far. First of all it supports macros and functions.
 
-      Unfortunately this area is highly undocumented in the public domain. And
-      so the work uses only the code from [hello_fft](https://github.com/raspberrypi/userland/tree/master/host_applications/linux/apps/hello_pi/hello_fft)
-      which is available as source and binary as Rosetta Stone.
+Unfortunately this area is highly undocumented in the public domain. And so the
+work uses only the code from
+[hello_fft](https://github.com/raspberrypi/userland/tree/master/host_applications/linux/apps/hello_pi/hello_fft)
+which is available as source and binary as Rosetta Stone.
 
 [&rarr; Assembler](#vc4asm), [&rarr;
         Disassembler](#vc4dis), [&rarr;Build instructions](#build), [&rarr;Samples](#sample)
@@ -37,7 +39,9 @@ You can clone this repository or the original code can be found
 The heart of the software. It assembles QPU code to binary or C
       constants.
 
-    vc4asm [-o <bin-output>] [-c <c-output>] [-E <preprocessed>] <qasm-file> [<qasm-file2> ...]
+```
+vc4asm [-o <bin-output>] [-c <c-output>] [-E <preprocessed>] <qasm-file> [<qasm-file2> ...]
+```
 
 ### Options
 
@@ -51,11 +55,15 @@ The heart of the software. It assembles QPU code to binary or C
   <dd>File name for C/C++ output. The result does not include surrounding
     braces. So write it to a separate file and include it from C as follows:
 
+```C
     <tt>static const uint32_t qpu_code[] = {
 
-      #include<C-output&gt;
+      #include<C-output>;
 
-      };</tt></dd>
+      };
+`` `
+
+  </dd>
   <dt><tt>-C</tt><tt> <C-output&gt;</tt></dt>
   <dd>Same as <tt>-c</tt>, but suppress trailing '<tt>,</tt>'.</dd>
   <dt><tt>-V</tt></dt>
