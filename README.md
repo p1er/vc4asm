@@ -25,45 +25,45 @@ The goal of the vc4asm project is a **full featured
 You can clone this repository or the original code can be found 
 [here](http://maazl.de/project/vc4asm/vc4asm.tar.bz2) 
 
-    <dl>
-      <dt>V0.1</dt>
-      <dd>First public release.</dd>
-      <dt>V0.1.1</dt>
-      <dd>Added support for binary constants between the code.</dd>
-    </dl>
+<dl>
+  <dt>V0.1</dt>
+  <dd>First public release.</dd>
+  <dt>V0.1.1</dt>
+  <dd>Added support for binary constants between the code.</dd>
+</dl>
 
 ## <a id="vc4asm" name="vc4asm"></a>Assembler <tt>vc4asm</tt>
 
 The heart of the software. It assembles QPU code to binary or C
       constants.
 
-    <pre>vc4asm [-o &lt;bin-output&gt;] [-c &lt;c-output&gt;] [-E &lt;preprocessed&gt;] &lt;qasm-file&gt; [&lt;qasm-file2&gt; ...]</pre>
+    vc4asm [-o <bin-output>] [-c <c-output>] [-E <preprocessed>] <qasm-file> [<qasm-file2> ...]
 
 ### Options
 
-    <dl>
-      <dt><tt>-o &lt;bin-output&gt; </tt></dt>
-      <dd>File name for binary output. If omitted no binary output is generated.
+<dl>
+  <dt><tt>-o <bin-output&gt; </tt></dt>
+  <dd>File name for binary output. If omitted no binary output is generated.
 
-        Note that <tt>vc4asm</tt> always writes _little endian_
-        binaries.</dd>
-      <dt><tt>-c &lt;C-output&gt;</tt></dt>
-      <dd>File name for C/C++ output. The result does not include surrounding
-        braces. So write it to a separate file and include it from C as follows:
+    Note that <tt>vc4asm</tt> always writes _little endian_
+    binaries.</dd>
+  <dt><tt>-c <C-output&gt;</tt></dt>
+  <dd>File name for C/C++ output. The result does not include surrounding
+    braces. So write it to a separate file and include it from C as follows:
 
-        <tt>static const uint32_t qpu_code[] = {
+    <tt>static const uint32_t qpu_code[] = {
 
-          #include&lt;C-output&gt;
+      #include<C-output&gt;
 
-          };</tt></dd>
-      <dt><tt>-C</tt><tt> &lt;C-output&gt;</tt></dt>
-      <dd>Same as <tt>-c</tt>, but suppress trailing '<tt>,</tt>'.</dd>
-      <dt><tt>-V</tt></dt>
-      <dd>Check for Videocore IV constraints, e.g. reading a register file
-        address immediately after writing it.</dd>
-      <dt><tt>-E &lt;preprocessed-output&gt;</tt></dt>
-      <dd>This is experimental and intended for debugging purposes only.</dd>
-    </dl>
+      };</tt></dd>
+  <dt><tt>-C</tt><tt> <C-output&gt;</tt></dt>
+  <dd>Same as <tt>-c</tt>, but suppress trailing '<tt>,</tt>'.</dd>
+  <dt><tt>-V</tt></dt>
+  <dd>Check for Videocore IV constraints, e.g. reading a register file
+    address immediately after writing it.</dd>
+  <dt><tt>-E <preprocessed-output&gt;</tt></dt>
+  <dd>This is experimental and intended for debugging purposes only.</dd>
+</dl>
 
 ### File arguments
 
@@ -87,44 +87,44 @@ See the [Broadcom
 
 ## <a id="vc4dis" name="vc4dis"></a>Disassembler <tt>vc4dis</tt>
 
-    <pre>vc4dis [-o &lt;qasm-output&gt;] [-x[&lt;input-format&gt;]] [-M] [-F] [-v] [-b &lt;base-addr&gt;] &lt;input-file&gt; [&lt;input-file2&gt; ...]</pre>
+    vc4dis [-o <qasm-output>] [-x[<input-format>]] [-M] [-F] [-v] [-b <base-addr>] <input-file> [<input-file2> ...]
 
 ### Options
 
-    <dl>
-      <dt><tt>-o &lt;qasm-output&gt; </tt></dt>
-      <dd>Assembler output file, <tt>stdout</tt> by default.
+<dl>
+  <dt><tt>-o <qasm-output&gt; </tt></dt>
+  <dd>Assembler output file, <tt>stdout</tt> by default.
 
-        Note that <tt>vc4asm</tt> always writes _little endian_
-        binaries.</dd>
-      <dt><tt>-x&lt;input-format&gt;</tt></dt>
-      <dd><tt>32</tt> - 32 bit hexadecimal input, .e. 2 qwords per instruction,
-        default if <tt>&lt;input-format&gt;</tt> is missing.
+    Note that <tt>vc4asm</tt> always writes _little endian_
+    binaries.</dd>
+  <dt><tt>-x<input-format&gt;</tt></dt>
+  <dd><tt>32</tt> - 32 bit hexadecimal input, .e. 2 qwords per instruction,
+    default if <tt><input-format&gt;</tt> is missing.
 
-        <tt>64</tt> - 64 bit hexadecimal input.
+   <tt>64</tt> - 64 bit hexadecimal input.
 
-        <tt>0&nbsp;</tt> - binary input, _little endian_, default
-        without <tt>-x</tt>.</dd>
-      <dt><tt>-M</tt></dt>
-      <dd>Do not generate <tt>mov</tt> instructions. <tt>mov</tt> is no native
-        QPU instruction, it is emulated by trivial operators like <tt>or r1,
-          r0, r0</tt>. Without this option <tt>vc4dis</tt> generated <tt>mov</tt>
-        instead of the real instruction if such a situation is detected.</dd>
-      <dt><tt>-F</tt></dt>
-      <dd>Do not write floating point constants. Without this option <tt>vc4dis</tt>
-        writes immediate values that are likely to be a floating point number as
-        float. This may not always hit the nail on the head.</dd>
-      <dt><tt>-v</tt></dt>
-      <dd>Write QPU instruction set bit fields as comment right to each
-        instruction. This is mainly for debugging purposes.</dd>
-      <dt><tt>-V</tt></dt>
-      <dd>Check for Videocore IV constraints, e.g. reading a register file
-        address immediately after writing it.</dd>
-      <dt><tt>-b &lt;base-addr&gt;</tt></dt>
-      <dd>Base address. This is the physical memory address of the first
-        instruction code passed to <tt>vc4dis</tt>. This is only significant
-        for absolute branch instructions.</dd>
-    </dl>
+    <tt>0&nbsp;</tt> - binary input, _little endian_, default
+    without <tt>-x</tt>.</dd>
+  <dt><tt>-M</tt></dt>
+  <dd>Do not generate <tt>mov</tt> instructions. <tt>mov</tt> is no native
+    QPU instruction, it is emulated by trivial operators like <tt>or r1,
+      r0, r0</tt>. Without this option <tt>vc4dis</tt> generated <tt>mov</tt>
+    instead of the real instruction if such a situation is detected.</dd>
+  <dt><tt>-F</tt></dt>
+  <dd>Do not write floating point constants. Without this option <tt>vc4dis</tt>
+    writes immediate values that are likely to be a floating point number as
+    float. This may not always hit the nail on the head.</dd>
+  <dt><tt>-v</tt></dt>
+  <dd>Write QPU instruction set bit fields as comment right to each
+    instruction. This is mainly for debugging purposes.</dd>
+  <dt><tt>-V</tt></dt>
+  <dd>Check for Videocore IV constraints, e.g. reading a register file
+    address immediately after writing it.</dd>
+  <dt><tt>-b <base-addr&gt;</tt></dt>
+  <dd>Base address. This is the physical memory address of the first
+    instruction code passed to <tt>vc4dis</tt>. This is only significant
+    for absolute branch instructions.</dd>
+</dl>
 
 ### File arguments
 
