@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta content="text/html; charset=iso-8859-15" http-equiv="content-type">
+    <title>VC4ASM Instructions</title>
+    <meta content="Marcel M&uuml;ller" name="author">
+    <meta content="Raspberry Pi BCM2835 QPU macro assembler" name="keywords">
+    <link rel="stylesheet" href="infstyle.css" type="text/css">
+  </head>
+  <body>
+    <h1>VC4ASM - Assembler instructions</h1>
+    <p><a href="index.html">&uarr; Top</a>, <a href="#ADD">ADD ALU</a>, <a href="#MUL">MUL
+        ALU</a>, <a href="#mov">mov</a>, <a href="#ldi">ldi</a>, <a href="#sema">Semaphore</a>,
+      <a href="#bra">Branch</a>, <a href="#sig">Signal </a></p>
+    <h2>General rules</h2>
+    <ul>
+      <li>Each line of code with QPU assembler instructions generates exactly
+        one 64 bit OP code for the QPU.</li>
+      <li>Multiple logical instructions can be placed in one line as long as
+        their combination still fits into one OP code. The delimiter is <tt>;</tt>.
+        Example:<br>
+        <tt>mov ra11, rb11; mov rb11, ra11; ldtmu0</tt></li>
+      <li>The sequence of the instructions in one line is normally not
+        significant. Only if an instruction can be realized by the ADD and the
+        MUL ALU then the ADD ALU is preferred as long as it has not already been
+        used in the current line. You might use <tt>nop</tt> to explicitly mark
+        the ADD ALU as used and place the second ALU instruction to the MUL ALU.</li>
+    </ul>
+    <h2><a id="ADD" name="ADD"></a>ADD ALU instruction</h2>
+    <pre><var>binaryopcode destination, source1, source2</var><br><var>unaryopcode destination, source1</var><var>opcode</var>.if<var>cc</var> ...<var>
+opcode</var>.setf ...</pre>
+    <dl>
+      <dt><var><tt>binaryopcode</tt></var></dt>
+      <dd>
+        <table border="1" cellpadding="2" cellspacing="0">
+          <thead>
+            <tr>
+              <th colspan="2" rowspan="1">Integer instruction</th>
+              <th colspan="2" rowspan="1">Floating point instruction</th>
+              <th colspan="2" rowspan="1">8 bit instruction</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><tt>add</tt></td>
+              <td><tt>destination = source1 + source2</tt></td>
+              <td><tt>fadd</tt></td>
+              <td><tt>destination = source1 + source2</tt></td>
+              <td><tt>v8adds</tt></td>
+              <td><tt>destination[4] = min(max(source1[4] + source2[4]), 255),
+                  0)</tt></td>
+            </tr>
+            <tr>
+              <td><tt>sub</tt></td>
+              <td><tt>destination = source1 - source2</tt></td>
+              <td><tt>fsub</tt></td>
+              <td><tt>destination = source1 - source2</tt></td>
+              <td><tt>v8subs</tt></td>
+              <td><tt>destination[4] = min(max(source1[4] - source2[4]), 255),
+                  0)</tt></td>
+            </tr>
+            <tr>
+              <td><tt>min</tt></td>
+              <td><tt>destination = min(source1, source2)</tt></td>
+              <td><tt>fmin</tt></td>
+              <td><tt>destination = min(source1, source2)</tt></td>
+              <td colspan="2" rowspan="9"><br>
+              </td>
+            </tr>
+            <tr>
+              <td><tt>max</tt></td>
+              <td><tt>destination = max(source1, source2)</tt></td>
+              <td><tt>fmax</tt></td>
+              <td><tt>destination = max(source1, source2)</tt></td>
+            </tr>
+            <tr>
+              <td><tt>and</tt></td>
+              <td><tt>destination = source1 &amp; source2</tt></td>
+              <td><tt>fminabs</tt></td>
+              <td><tt>destination = min(abs(source1), abs(source2))</tt></td>
+            </tr>
+            <tr>
+              <td><tt>or</tt></td>
+              <td><tt>destination = source1 | source2</tt></td>
+              <td><tt>fmaxabs</tt></td>
+              <td><tt>destination = max(abs(source1), abs(source2))</tt></td>
+            </tr>
+            <tr>
+              <td><tt>xor</tt></td>
+              <td><tt>destination = source1 ^ source2</tt></td>
+              <td colspan="2" rowspan="5"><br>
+              </td>
+            </tr>
+            <tr>
+              <td><tt>shl</tt></td>
+              <td><tt>destination = source1 &lt;&lt;&lt; source2</tt></td>
+            </tr>
+            <tr>
+              <td><tt>shr</tt></td>
+              <td><tt>destination = source1 &gt;&gt;&gt; source2</tt></td>
+            </tr>
+            <tr>
+              <td><tt>asr</tt></td>
+              <td><tt>destination = source1 &gt;&gt; source2</tt></td>
+            </tr>
+            <tr>
+              <td><tt>ror</tt></td>
+              <td><tt>destination = rotate(source, source2)</tt></td>
+            </tr>
+          </tbody>
+        </table>
+      </dd>
+      <dt><var><tt>unaryopcode</tt></var></dt>
+      <dd>
+        <table border="1" cellpadding="2" cellspacing="0">
+          <thead>
+            <tr>
+              <th colspan="2" rowspan="1">Integer instruction</th>
+              <th colspan="2" rowspan="1">Conversion instruction</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><tt>not</tt></td>
+              <td><tt>destination = ~source2</tt></td>
+              <td><tt>itof</tt></td>
+              <td><tt>destination = (float)source2</tt></td>
+            </tr>
+            <tr>
+              <td><tt>clz</tt></td>
+              <td><tt>destination = 32-floor(log<sub><font size="-1">2</font></sub>(2*source2+1))</tt></td>
+              <td><tt>ftoi</tt></td>
+              <td><tt>destination = (int)source2</tt></td>
+            </tr>
+          </tbody>
+        </table>
+      </dd>
+      <dt><var><tt>destination</tt></var></dt>
+      <dd>Target <a href="expressions.html#register">register</a>.</dd>
+      <dt><var><tt>source1, source2</tt></var></dt>
+      <dd>Source <a href="expressions.html#register">register</a> or <a href="expressions.html#SMI">small
+          immediate value</a>.</dd>
+      <dt><tt>.if</tt><var><tt>cc</tt></var></dt>
+      <dd>Assignment condition. Note that <tt>vc4asm</tt> accepts the
+        assignment condition also as extension to the destination register.</dd>
+    </dl>
+    <h3> Example</h3>
+    <pre>add r3, ra0, unif<var></var></pre>
+    <h2><a id="MUL" name="MUL"></a>MUL ALU instruction</h2>
+    <pre><var>opcode destination, source1, source2
+opcode</var>.if<var>cc destination, source1, source2
+opcode</var>.setf <var>destination, source1, source2</var><br><var>opcode</var>.rot <var>count, destination, source1, source2</var> </pre>
+    <dl>
+      <dt><var><tt>opcode</tt></var></dt>
+      <dd>
+        <table border="1" cellpadding="2" cellspacing="0">
+          <thead>
+            <tr>
+              <th colspan="2" rowspan="1">Integer instruction</th>
+              <th colspan="2" rowspan="1">Floating point instruction</th>
+              <th colspan="2" rowspan="1">8 bit instruction</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><tt>mul24</tt></td>
+              <td><tt>destination = source1 * source2</tt></td>
+              <td><tt>fmul</tt></td>
+              <td><tt>destination = source1 + source2</tt></td>
+              <td><tt>v8mul</tt></td>
+              <td><tt>destination[4] = min(max(source1[4] * source2[4] / 255),
+                  255), 0)</tt></td>
+            </tr>
+            <tr>
+              <td colspan="2" rowspan="4"><br>
+              </td>
+              <td colspan="2" rowspan="4"><br>
+              </td>
+              <td><tt>v8adds</tt></td>
+              <td><tt>destination[4] = min(max(source1[4] + source2[4]), 255),
+                  0)</tt></td>
+            </tr>
+            <tr>
+              <td><tt>v8subs</tt></td>
+              <td><tt>destination[4] = min(max(source1[4] + source2[4]), 255),
+                  0)</tt></td>
+            </tr>
+            <tr>
+              <td><tt>v8min</tt></td>
+              <td><tt>destination[4] = min(source1[4], source2[4])</tt></td>
+            </tr>
+            <tr>
+              <td><tt>v8max</tt></td>
+              <td><tt>destination[4] = min(source1[4], source2[4])</tt></td>
+            </tr>
+          </tbody>
+        </table>
+      </dd>
+      <dt><var><tt>destination</tt></var></dt>
+      <dd>Target <a href="expressions.html#register">register</a>.</dd>
+      <dt><var><tt>source1, source2</tt></var></dt>
+      <dd>Source <a href="expressions.html#register">register</a> or <a href="expressions.html#SMI">small
+          immediate value</a>.</dd>
+      <dt><tt>.if</tt><var><tt>cc</tt></var></dt>
+      <dd>Assignment condition. Note that <tt>vc4asm</tt> accepts the
+        assignment condition also as extension to the destination register.</dd>
+      <dt><var><tt>count</tt></var></dt>
+      <dd>Number of QPU elements the result should be rotated before assignment
+        [0 to 15] or register <tt>r5</tt>.</dd>
+    </dl>
+    <dl>
+    </dl>
+    <h2><a id="mov" name="mov"></a>Move instruction</h2>
+    <pre>mov <var>destination, source</var><var></var><br>mov <var><var>destination,</var> register</var> &lt;&lt; <var>rotate</var><br>mov <var>destination, register</var> &gt;&gt; <var>rotate</var><br>mov <var>destination, register</var> &gt;&gt; r5<br>mov.setf ...</pre>
+    <dl>
+      <dt><var><tt>destination</tt></var></dt>
+      <dd>Target <a href="expressions.html#register">register</a>.</dd>
+      <dt><var><tt>source</tt></var></dt>
+      <dd>Source <a href="expressions.html#register">register</a> or <a href="expressions.html#constant">immediate
+          value</a>.</dd>
+      <dt><var><tt>register</tt></var></dt>
+      <dd>Source <a href="expressions.html#register">register</a> for small
+        rotate instructions.</dd>
+      <dt><tt><var>rotate</var></tt></dt>
+      <dd>Optional rotation of the value.</dd>
+    </dl>
+    <p>Strictly speaking <tt>mov</tt> is no QPU instruction at all. It is
+      simply a convenient way to create a no-op ALU instruction like <tt>or</tt>
+      with two identical source arguments or a <a href="#ldi">load immediate
+        instruction</a>, whatever fits best.</p>
+    <p>If <b><var><tt>source</tt></var> is a register</b>, the assembler
+      preferably uses the ADD ALU to realize the movement. If either the ADD ALU
+      is already used by the current instruction or a rotate operation is
+      requested it uses the MUL ALU. The op-code is <tt>or</tt> in case of the
+      ADD ALU and <tt>v8min</tt> for the MUL ALU.</p>
+    <p>If <b><var><tt>source</tt></var> fits into a small immediate value</b>
+      then the assembler prefers this over load immediate. The assembler is
+      quite smart when using small immediates. E.g. the immediate value 64 which
+      has no direct equivalent can be achieved by passing 8 to both inputs of
+      the MUL ALU with instruction <tt>mul24</tt>. Again the ADD ALU is
+      preferred when available. But some hacks like the example before require
+      the MUL ALU, but the same value could be constructed by the ADD ALU from
+      the value 4 with the <tt>shl</tt> instruction. See the <a href="smallimmediate.html">small
+        immediate table</a> for a list of supported values. The value 0 can be
+      assigned without the use of a small immediate value by using <tt>xor</tt>
+      or <tt>v8subs</tt> with any identical source.<br>
+      If neither the second ALU nor signalling flags are used then the
+      instruction is converted back to <tt>ldi</tt> to save ALU power.</p>
+    <p>If <b><var><tt>source</tt></var> does not fit into a small immediate</b>
+      than a <a href="#ldi"><tt>ldi</tt></a> instruction is generated.</p>
+    <p>With some restrictions you can handle <b>two move instructions in a
+        single cycle</b>. E.g. if both sources are registers or if one source is
+      from register file A and the other source fits into a small immediate
+      value of if both sources can be created from the same immediate value.</p>
+    <h3>Examples</h3>
+    <pre>mov ra29, 16<br>mov r3, rb4 &lt;&lt; 2; mov r2, ra11  # Uses the MUL ALU for the first move (because of the vector rotation) and the ADD ALU for the second one.<br>mov r0, 0x8000000; mov tmurs, 1 # Uses small immediate value 1 with ror r0, 1, 1 to create the 0x80000000.</pre>
+    <h2><a id="ldi" name="ldi"></a>Load immediate</h2>
+    <pre>ldi <var>destination, constant</var><br>ldi <var>destination1, destination2, constant</var></pre>
+    <dl>
+      <dt><var><tt>destination</tt></var></dt>
+      <dd>Target <a href="expressions.html#register">register</a>.</dd>
+      <dt><var><tt>constant</tt></var></dt>
+      <dd><a href="expressions.html#constant">Immediate value</a>.</dd>
+    </dl>
+    In contrast to <tt>mov ldi</tt> always generates a load immediate
+    instruction even if the constant fits into a small immediate value. The same
+    value can be assigned to two targets at once by using the ADD and the MUL
+    ALU output.<br>
+    <h3>Example</h3>
+    <pre>ldi ra7, 0xffff0000</pre>
+    <h2><a id="pack" name="pack"></a>Pack/unpack</h2>
+    <p>All ALU instructions including <tt>mov</tt> and <tt>ldi</tt> can be
+      extended by pack/unpack operations. Be aware of the restriction that apply
+      especially to the MUL ALU.</p>
+    <pre>opcode.pack<var>xx</var> <var>destination, ...</var><br>opcode<var></var> <var>destination</var>.<var><var>xx</var>, ...</var>
+opcode.unpack<var>yy</var> <var>destination, ...</var><br>opcode<var></var> <var>destination, source.xx</var><var>, ...</var><var></var>opcode<var></var> <var>destination, ..., source.xx</var><var></var></pre>
+    <dl>
+      <dt><var><tt>xx</tt></var></dt>
+      <dd>Destination pack mode
+        <table border="1" cellpadding="2" cellspacing="0">
+          <tbody>
+            <tr>
+              <th colspan="1" rowspan="1"><var><tt>xx</tt></var></th>
+              <th colspan="1" rowspan="1">Source pattern</th>
+              <th colspan="1" rowspan="1">Target pattern</th>
+              <th>Comment</th>
+            </tr>
+            <tr>
+              <td><tt>32 </tt></td>
+              <td><tt>BA DC FE HG</tt></td>
+              <td><tt><tt>BA DC FE HG</tt> </tt></td>
+              <td>no pack<tt> </tt></td>
+            </tr>
+            <tr>
+              <td><tt>16a </tt></td>
+              <td><tt>BA DC __ __ </tt></td>
+              <td><tt><tt>BA DC __ __</tt> </tt></td>
+              <td>ADD ALU only</td>
+            </tr>
+            <tr>
+              <td><tt>16b </tt></td>
+              <td><tt>BA DC __ __</tt></td>
+              <td><tt>__ __ BA DC</tt></td>
+              <td>ADD ALU only</td>
+            </tr>
+            <tr>
+              <td><tt>8abcd </tt></td>
+              <td><tt>BA __ __ __ </tt></td>
+              <td><tt>BA BA BA BA </tt></td>
+              <td>replicate to all bytes</td>
+            </tr>
+            <tr>
+              <td><tt>8a </tt></td>
+              <td><tt>BA __ __ __</tt></td>
+              <td><tt>BA __ __ __</tt></td>
+              <td><br>
+              </td>
+            </tr>
+            <tr>
+              <td><tt>8b </tt></td>
+              <td><tt>BA __ __ __</tt></td>
+              <td><tt>__ BA __ __</tt></td>
+              <td><br>
+              </td>
+            </tr>
+            <tr>
+              <td><tt>8c </tt></td>
+              <td><tt>BA __ __ __</tt></td>
+              <td><tt>__ __ BA __</tt></td>
+              <td><br>
+              </td>
+            </tr>
+            <tr>
+              <td><tt>8d </tt></td>
+              <td><tt>BA __ __ __</tt></td>
+              <td><tt>__ __ __ BA</tt></td>
+              <td><br>
+              </td>
+            </tr>
+            <tr>
+              <td><tt>32s </tt></td>
+              <td><tt>BA DC FE HG</tt></td>
+              <td><tt>BA DC FE HG</tt></td>
+              <td>saturate, ADD ALU only </td>
+            </tr>
+            <tr>
+              <td><tt>16as </tt></td>
+              <td><tt><tt>BA DC __ __</tt></tt></td>
+              <td><tt><tt>BA DC __ __</tt></tt></td>
+              <td>saturate, ADD ALU only</td>
+            </tr>
+            <tr>
+              <td><tt>16bs </tt></td>
+              <td><tt><tt>BA DC __ __</tt></tt></td>
+              <td><tt>__ __ BA DC</tt></td>
+              <td>saturate, ADD ALU only</td>
+            </tr>
+            <tr>
+              <td><tt>8abcds </tt></td>
+              <td><tt>BA __ __ __</tt></td>
+              <td><tt>BA BA BA BA</tt></td>
+              <td>replicate to all bytes, saturate, ADD ALU only</td>
+            </tr>
+            <tr>
+              <td><tt>8as </tt></td>
+              <td><tt>BA __ __ __</tt></td>
+              <td><tt>BA __ __ __</tt></td>
+              <td>saturate, ADD ALU only </td>
+            </tr>
+            <tr>
+              <td><tt>8bs </tt></td>
+              <td><tt>BA __ __ __</tt></td>
+              <td><tt>__ BA __ __ </tt></td>
+              <td>saturate, ADD ALU only </td>
+            </tr>
+            <tr>
+              <td><tt>8cs </tt></td>
+              <td><tt>BA __ __ __</tt></td>
+              <td><tt>__ __ BA __ </tt></td>
+              <td>saturate, ADD ALU only </td>
+            </tr>
+            <tr>
+              <td><tt>8ds </tt></td>
+              <td><tt>BA __ __ __</tt></td>
+              <td><tt>__ __ __ AB </tt></td>
+              <td>saturate, ADD ALU only </td>
+            </tr>
+          </tbody>
+        </table>
+      </dd>
+      <dt><var><tt>yy</tt></var></dt>
+      <dd>Source unpack mode, register file A or <tt>r4</tt>.<br>
+        <table border="1" cellpadding="2" cellspacing="0">
+          <tbody>
+            <tr>
+              <th colspan="1" rowspan="1"><var><tt>yy</tt></var></th>
+              <th colspan="1" rowspan="1">Source pattern</th>
+              <th colspan="1" rowspan="1">Target pattern</th>
+            </tr>
+            <tr>
+              <td><tt>32 </tt></td>
+              <td><tt>BA DC FE HG</tt></td>
+              <td><tt>BA DC FE HG</tt></td>
+            </tr>
+            <tr>
+              <td><tt>16a </tt></td>
+              <td><tt>BA DC __ __</tt></td>
+              <td><tt>BA DC __ __</tt></td>
+            </tr>
+            <tr>
+              <td><tt>16b </tt></td>
+              <td><tt><tt>__ __ BA DC</tt></tt></td>
+              <td><tt>BA DC __ __</tt></td>
+            </tr>
+            <tr>
+              <td><tt>8ddup </tt></td>
+              <td><tt>__ __ __ BA</tt></td>
+              <td><tt>BA BA BA BA</tt></td>
+            </tr>
+            <tr>
+              <td><tt>8a </tt></td>
+              <td><tt>BA __ __ __</tt></td>
+              <td><tt>BA __ __ __</tt></td>
+            </tr>
+            <tr>
+              <td><tt>8b </tt></td>
+              <td><tt><tt>__ BA __ __</tt></tt></td>
+              <td><tt>BA __ __ __</tt></td>
+            </tr>
+            <tr>
+              <td><tt>8c </tt></td>
+              <td><tt><tt>__ __ BA __</tt></tt></td>
+              <td><tt>BA __ __ __</tt></td>
+            </tr>
+            <tr>
+              <td><tt>8d </tt></td>
+              <td><tt>__ __ __ BA</tt></td>
+              <td><tt>BA __ __ __</tt></td>
+            </tr>
+          </tbody>
+        </table>
+      </dd>
+    </dl>
+    <p>All patterns are nibbles in little endian memory order.</p>
+    <h2><a id="sema" name="sema"></a>Semaphore instruction</h2>
+    <pre>sacq <var>destination, number</var><br>srel <var>destination, number</var><br>mov <var>destination, sacqnumber</var><br>mov <var>destination, srelnumber</var></pre>
+    <dl>
+      <dt><var><tt>destination</tt></var></dt>
+      <dd>Target <a href="expressions.html#register">register</a>, usually <tt>-</tt>,
+        since the output of a semaphore instruction is not generally useful. But
+        if it happens to be useful you may assign the value like with an <tt><a
+            href="#ldi">ldi</a></tt> instruction.</dd>
+      <dt><var><tt>number</tt></var></dt>
+      <dd>Semaphore number to acquire or release. Only the low order 4 bits of
+        the value are used to identify the semaphore number. Bit 4 is controlled
+        by the acquire/release flag and any further bits are placed unchanged
+        into the immediate value field of the instruction and may be chosen
+        arbitrary to if you want to assign a destination.</dd>
+    </dl>
+    <h3>Example</h3>
+    <pre>sacq -, 7<br>mov -, sacq7</pre>
+    <p><var></var>The two instructions above are equivalent. The following
+      function below provides Broadcom compatible syntax.</p>
+    <pre>.set sacq(i) sacq0 + i<br>mov -, sacq(7)</pre>
+    <h2><a id="bra" name="bra"></a>Branch instruction</h2>
+    <pre>bra.<var>cond destination, </var><var>target</var><br>brr.<var>cond destination, target</var><br>bra.<var>cond destination, target1, target2</var><br>brr.<var>cond destination, target1, target2</var><br>bra.<var>cond destination1, destination2, target1, target2</var><br>brr.<var>cond destination1, destination2, target1, target2</var></pre>
+    <dl>
+      <dt><var><tt>.cond</tt></var></dt>
+      <dd>Branch condition, optional. One of:<br>
+        <table border="1" cellpadding="2" cellspacing="0">
+          <tbody>
+            <tr>
+              <th>condition</th>
+              <th>zero flag</th>
+              <th>negative flag</th>
+              <th>carry flag</th>
+            </tr>
+            <tr>
+              <td>set on all SIMD elements</td>
+              <td><tt>.allz</tt></td>
+              <td><tt>.alln</tt></td>
+              <td><tt>.allc</tt></td>
+            </tr>
+            <tr>
+              <td>not set on all SIMD elements</td>
+              <td><tt>.allnz</tt></td>
+              <td><tt>.allnn</tt></td>
+              <td><tt>.allnc</tt></td>
+            </tr>
+            <tr>
+              <td>set on at least one SIMD element</td>
+              <td><tt>.anyz</tt></td>
+              <td><tt>.anyn</tt></td>
+              <td><tt>.anyc</tt></td>
+            </tr>
+            <tr>
+              <td>not set on at least one SIMD element</td>
+              <td><tt>.anynz</tt></td>
+              <td><tt>.anynn</tt></td>
+              <td><tt>.anync</tt></td>
+            </tr>
+          </tbody>
+        </table>
+      </dd>
+      <dt><var><tt>destination, destination1, destination2</tt></var></dt>
+      <dd>Target <a href="expressions.html#register">register</a> or <tt>-</tt>.
+        The destination(s) receive the PC position where the branch takes place,
+        i.e. PC + 4, but the assignment only takes place if the branch is
+        actually taken.<br>
+        The option to have two destination registers require to specify two
+        branch targets also. In doubt use <tt>0</tt> or <tt>-</tt>, e.g: <tt>brr
+          ra_link, r0, -, r:target</tt></dd>
+      <dt><var><tt>target, target1, target2</tt></var></dt>
+      <dd>Register from register file A, constant or label. Branch instructions
+        can add two targets if one of them is a register and the other one is a
+        constant.</dd>
+    </dl>
+    <p><tt>bra</tt> creates an absolute branch, i.e. target must be a physical
+      memory address. <tt>brr</tt> creates a relative branch.</p>
+    <p>Remember that branch instructions are executed 3 instructions delayed,
+      i.e. three further instructions are always executed.</p>
+    <h2><a id="sig" name="sig"></a>Signaling instruction</h2>
+    <pre>bkpt<br>thrsw<br>thrend<br>sbwait<br>sbdone<br>lthrsw<br>loadcv<br>loadc<br>ldcend<br>ldtmu0<br>ldtmu1<br>loadam</pre>
+    The above signals can be combined with any normal ALU instructions in one
+    line, i.e. no load immediate, no small immediate, no semaphore and no
+    branch. See Broadcom reference guide for details.
+  </body>
+</html>

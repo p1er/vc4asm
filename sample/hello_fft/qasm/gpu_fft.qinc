@@ -1,0 +1,526 @@
+# BCM2835 "GPU_FFT"
+#
+# Copyright (c) 2013, Andrew Holme.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the copyright holder nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+##############################################################################
+# Bit-rotated write
+
+.set PASS16_STRIDE, ((1<<STAGES)/16*8)
+.set PASS32_STRIDE, ((1<<STAGES)/32*8)
+.set PASS64_STRIDE, ((1<<STAGES)/64*8)
+
+##############################################################################
+# Load twiddle factors
+
+# (MM) Optimized: interleave TMU instructions to reduce QPU stalls
+.macro load_tw, stride, off, num, addr
+    shl r2, elem_num, 3
+    add t0s, addr, r2;  mov r0, addr                # re[0]
+    .if num == 1
+        add r0, r0, r2;       ldtmu0
+        add t0s, r0, 4; 
+        mov ra_tw_re+off, r4; ldtmu0
+        mov rb_tw_im+off, r4
+    .else
+        add r0, r0, r2; mov r1, stride
+        add t0s, r0, 4;                             # im[0]
+        add r0, r0, r1;             ldtmu0          # <re[0]
+        .rep i, num-1
+            mov t0s, r0;    mov ra_tw_re+off+i, r4; # re[i+1]
+                                    ldtmu0          # <im[i]
+            add t0s, r0, 4; mov rb_tw_im+off+i, r4; # im[i+1]
+            add r0, r0, r1;         ldtmu0          # <re[i+1]
+        .endr
+        mov ra_tw_re+off+num-1, r4; ldtmu0          # <im[num-1]
+        mov rb_tw_im+off+num-1, r4;
+    .endif
+.endm
+
+##############################################################################
+# VPM pointers
+
+.macro inst_vpm, in_inst, out_0, out_1, out_2, out_3
+    mov r0, vpm_setup(1, 1, v32( 0,0))
+    mov r1, vpm_setup(1, 1, v32(16,0)) - vpm_setup(1, 1, v32(0,0))
+    # (MM) Optimized: instruction packing
+    mul24 r2, in_inst, vpm_setup(1, 1, v32(0,2)) - vpm_setup(1, 1, v32(0,0))
+
+    add out_0, r0, r2; v8adds r0, r0, r1
+    add out_1, r0, r2; v8adds r0, r0, r1
+    # (MM) Optimized: do not assign to r39 (nop)
+    .if out_2 != nop
+    add out_2, r0, r2; v8adds r0, r0, r1
+    add out_3, r0, r2
+    .endif
+.endm
+
+##############################################################################
+
+.macro proc, rx_ptr, label
+    brr rx_ptr, label
+    nop
+    nop
+    nop
+.endm
+
+##############################################################################
+
+.macro write_vpm_16, arg
+    mov vw_setup, arg
+    mov vpm, r0
+    mov vpm, r1
+.endm
+
+.macro write_vpm_32
+    mov vw_setup, ra_vpm_lo
+    fadd vpm, ra_32_re, r0
+    fadd vpm, rb_32_im, r1
+    mov vw_setup, ra_vpm_hi
+    fsub vpm, ra_32_re, r0
+    fsub vpm, rb_32_im, r1
+.endm
+
+.macro write_vpm_64
+    mov vw_setup, rb_vpm
+    fadd vpm, ra_64+0, rb_64+0
+    fadd vpm, ra_64+1, rb_64+1
+    mov vw_setup, rb_vpm_16
+    fadd vpm, ra_64+2, rb_64+2
+    fadd vpm, ra_64+3, rb_64+3
+    mov vw_setup, rb_vpm_32
+    fsub vpm, ra_64+0, rb_64+0
+    fsub vpm, ra_64+1, rb_64+1
+    mov vw_setup, rb_vpm_48
+    fsub vpm, ra_64+2, rb_64+2
+    fsub vpm, ra_64+3, rb_64+3
+.endm
+
+##############################################################################
+
+.macro body_ra_save_16, arg_vpm, arg_vdw
+    write_vpm_16 arg_vpm
+
+    mov -, vw_wait
+
+    .rep i, 7
+        mov -, sacq(i+9) # Master waits for slave
+        mov -, srel(i+1) # Master releases slave
+    .endr
+
+    bra -, ra_link_1
+
+    mov vw_setup, arg_vdw
+    mov vw_setup, vdw_setup_1(0) + PASS16_STRIDE-16*4
+    add ra_save_ptr, ra_save_ptr, rb_0x40; mov vw_addr, ra_save_ptr
+.endm
+
+##############################################################################
+
+.macro body_rx_save_slave_16, arg_vpm
+    write_vpm_16 arg_vpm
+
+    # (MM) Optimized: easier procedure chains
+    brr -, r:sync, ra_sync
+
+    # (MM) Optimized: save another cycle by increased distance
+    # between vpm setup and vpm read.
+    mov vr_setup, arg_vpm
+    nop
+    mov -, vpm
+.endm
+
+##############################################################################
+
+.macro body_ra_save_32
+    write_vpm_32
+
+    mov -, vw_wait
+
+    .rep i, 7
+        mov -, sacq(i+9) # Master waits for slave
+        mov -, srel(i+1) # Master releases slave
+    .endr
+
+    bra -, ra_link_1
+
+    mov vw_setup, ra_vdw_32
+    mov vw_setup, vdw_setup_1(0) + PASS32_STRIDE-16*4
+    add ra_save_ptr, ra_save_ptr, rb_0x40; mov vw_addr, ra_save_ptr
+.endm
+
+##############################################################################
+
+.macro body_rx_save_slave_32
+    write_vpm_32
+    # (MM) Optimized: scheduled instructions of write_vpm_32 with vpm read code
+    # to reduce QPU stalls because of fifo dependencies at vpm access.
+    .back 2
+    mov vr_setup, ra_vpm_lo
+    # (MM) Optimized: easier procedure chains
+    brr -, r:sync, ra_sync
+    mov -, vpm
+    .endb
+.endm
+
+##############################################################################
+
+.macro body_ra_save_64, step
+    mov -, vw_wait
+
+    .rep i, 7
+        mov -, srel(i+1) # Master releases slaves
+    .endr
+
+    write_vpm_64
+
+    .rep i, 7
+        mov -, sacq(i+9) # Master waits for slaves
+    .endr
+
+    bra -, ra_link_1
+
+    mov vw_setup, vdw_setup_0(64, 16, dma_h32(0,0))
+    mov vw_setup, vdw_setup_1(PASS64_STRIDE-16*4)
+    add ra_save_ptr, ra_save_ptr, step; mov vw_addr, ra_save_ptr
+.endm
+
+##############################################################################
+
+.macro body_rx_save_slave_64
+    # (MM) Optimized:
+    # - Calculate entry point at setup like for body_rx_sync_slave,
+    # saves 7 instructions
+    # - Scheduled code of write_vpm_64 with branch instructions,
+    # saves another 5 instructions.
+    # - Removed unnecessary code for semaphore 0 (8 instructions dead code).
+    # - Furthermore store the return address as offset for the second branch to srel.
+    .rep i, 7
+        brr ra_temp, r:2f
+        mov -, sacq(i+1) # Slave waits for master
+        mov vw_setup, rb_vpm # start with write_vpm_64 here
+        fadd vpm, ra_64+0, rb_64+0
+    .endr
+:2
+    # write_vpm_64
+    fadd vpm, ra_64+1, rb_64+1
+    mov vw_setup, rb_vpm_16
+    fadd vpm, ra_64+2, rb_64+2
+    fadd vpm, ra_64+3, rb_64+3
+    mov vw_setup, rb_vpm_32
+    fsub vpm, ra_64+0, rb_64+0
+    fsub vpm, ra_64+1, rb_64+1
+
+    # (MM) Optimized: Take the return address from above as base of the branch target.
+    bra -, ra_temp, :3f - :2 - 4*8
+
+    mov vw_setup, rb_vpm_48
+    fsub vpm, ra_64+2, rb_64+2
+    fsub vpm, ra_64+3, rb_64+3
+
+    .rep i, 7
+        bra -, ra_link_1
+        mov vr_setup, rb_vpm
+        mov -, vpm
+        mov -, srel(i+9) # Slave releases master
+    .endr
+:3
+.endm
+
+##############################################################################
+
+.macro body_ra_sync
+    mov -, vw_wait
+
+    .rep i, 7
+        mov -, sacq(i+9) # Master waits for slave
+    .if i==5
+        bra -, ra_link_1
+    .endif
+        mov -, srel(i+1) # Master releases slave
+    .endr
+.endm
+
+##############################################################################
+
+.macro body_rx_sync_slave
+    .rep i, 7
+        bra -, ra_link_1
+        mov -, srel(i+9) # Slave releases master
+        # (MM) Optimized: wait as late as possible
+        nop
+        mov -, sacq(i+1) # Slave waits for master
+    .endr
+.endm
+
+##############################################################################
+
+.macro fft_twiddles_32
+    # (MM) Optimized: less memory I/O
+    nop;             fmul r3, r0, ra_tw_re+TW32_ACTIVE # rr
+    nop;             fmul r2, r1, rb_tw_im+TW32_ACTIVE # ii
+    fsub r2, r3, r2; fmul r3, r1, ra_tw_re+TW32_ACTIVE # ir
+    mov r0, r2;      fmul r1, r0, rb_tw_im+TW32_ACTIVE # ri
+    fadd r1, r1, r3
+.endm
+
+##############################################################################
+# FFT-16 codelet
+
+.macro body_fft_16
+# (MM) Optimized: better use of both ALUs, no need for ra_temp
+    mov r3, 1<<0;              fmul      r2, ra_tw_re+TW16_ACTIVE+0, r0
+.rep i, 4
+.if i!=0
+    fsub.ifnz r1, r2, r1;      fmul      r2, ra_tw_re+TW16_ACTIVE+i, r0
+.endif
+    and.setf -, elem_num, r3;  fmul      r3, rb_tw_im+TW16_ACTIVE+i, r1
+    fsub.ifnz r0, r2, r3;      fmul.ifnz r2, rb_tw_im+TW16_ACTIVE+i, r0
+    mov r3, 1<<(i+1);          fmul.ifnz r1, ra_tw_re+TW16_ACTIVE+i, r1
+    fadd.ifnz r1, r1, r2;      mov.ifz  r2, r0 << (1<<i)
+    fadd.ifz  r0, r2, r0;      mov.ifnz r2, r0 >> (1<<i)
+.if i==3
+    bra -, ra_link_0
+.endif
+    fsub.ifnz r0, r2, r0;      mov.ifz  r2, r1 << (1<<i)
+    fadd.ifz  r1, r2, r1;      mov.ifnz r2, r1 >> (1<<i)
+.endr
+    fsub.ifnz r1, r2, r1
+.endm
+
+##############################################################################
+
+.macro bit_rev, shift, mask
+    # (MM) Optimized: use MUL ALU for small shifts
+    and r1, r0, mask
+    .if shift == 1
+        shr r0, r0, shift
+        and r0, r0, mask;  v8adds r1, r1, r1 # can't overflow because of mask
+    .elseif shift == 2
+        shr r0, r0, shift; v8adds r1, r1, r1 # can't overflow because of mask
+        and r0, r0, mask;  v8adds r1, r1, r1 # can't overflow because of mask
+    .else
+        shr r0, r0, shift
+        and r0, r0, mask
+        shl r1, r1, shift
+    .endif
+    or  r0, r0, r1
+.endm
+
+##############################################################################
+
+.macro interleave
+    and.setf -, elem_num, 1; mov r2, r0
+    mov.ifz  r0, r2; mov.ifnz r0, r1 >> 1
+    mov.ifnz r1, r1; mov.ifz  r1, r2 << 1
+.endm
+
+##############################################################################
+
+.macro read_rev, stride
+    add ra_load_idx, ra_load_idx, stride; mov r0, ra_load_idx
+
+    bit_rev 1, rx_0x5555    # 16 SIMD
+    bit_rev 2, rx_0x3333
+    bit_rev 4, rx_0x0F0F
+    bit_rev 8, rx_0x00FF    # reversal creates left shift by 16-STAGES
+.if STAGES>13
+    shl r0, r0, STAGES-13
+.endif
+.if STAGES<13
+    shr r0, r0, 13-STAGES
+.endif                      # r0 = re = {idx[0:STAGES-1], 1'b0, 2'b0}
+    add r1, r0, 4           # r1 = im = {idx[0:STAGES-1], 1'b1, 2'b0}
+
+    interleave
+    swizzle
+
+    add t0s, ra_addr_x, r0
+    add t0s, ra_addr_x, r1
+.endm
+
+.macro load_rev, stride, call
+    read_rev stride
+    nop;        ldtmu0
+    mov r0, r4; ldtmu0
+    mov r1, r4
+    brr ra_link_0, call
+    interleave
+.endm
+
+##############################################################################
+
+.macro read_lin, stride
+    shl r0, ra_load_idx, 3; mov r1, ra_load_idx
+    add r0, r0, ra_addr_x
+    add ra_load_idx, r1, stride; mov t0s, r0
+    add t0s, r0, 4
+.endm
+
+.macro load_lin, stride, call
+    read_lin stride
+    brr ra_link_0, call
+    nop;        ldtmu0
+    mov r0, r4; ldtmu0
+    mov r1, r4
+.endm
+
+##############################################################################
+# Unpack twiddles
+
+.macro unpack_twiddles
+# (MM) Optimized: do not rotate r2/r3 unnecessarily at the last turn
+.rep i, 3
+    and.setf -, elem_num, (8>>i)
+    mov ra_tw_re+TW16_ACTIVE+3-i, r2; mov.ifnz r2, r2 >> (8>>i)
+    mov rb_tw_im+TW16_ACTIVE+3-i, r3; mov.ifnz r3, r3 >> (8>>i)
+.endr
+    mov ra_tw_re+TW16_ACTIVE+3-3, r2; mov rb_tw_im+TW16_ACTIVE+3-3, r3
+.endm
+
+##############################################################################
+# Rotate twiddles
+
+.macro next_twiddles_32, tw32
+    # (MM) Optimized: better use of both ALUs
+    mov r2, ra_tw_re+TW32_ACTIVE; fmul r0, ra_tw_re+TW32_ACTIVE, rb_tw_im+tw32 # b.cos
+    mov r3, rb_tw_im+TW32_ACTIVE; fmul r1, rb_tw_im+TW32_ACTIVE, ra_tw_re+tw32 # a.sin
+    fsub r1, r1, r0;                                     fmul r0, r3, rb_tw_im+tw32 # b.sin
+    fsub rb_tw_im+TW32_ACTIVE, rb_tw_im+TW32_ACTIVE, r1; fmul r1, r2, ra_tw_re+tw32 # a.cos
+    fadd r1, r1, r0;
+    fsub ra_tw_re+TW32_ACTIVE, ra_tw_re+TW32_ACTIVE, r1
+.endm
+
+.macro next_twiddles_16, tw16
+    # (MM) Optimized: better use of both ALUs
+    mov r2, ra_tw_re+TW16_ACTIVE+3; fmul r1, ra_tw_re+TW16_ACTIVE+3, rb_tw_im+tw16 # b.cos
+    mov r3, rb_tw_im+TW16_ACTIVE+3; fmul r0, rb_tw_im+TW16_ACTIVE+3, ra_tw_re+tw16 # a.sin
+    fsub r3, r0, r1;                     fmul r1, r3, rb_tw_im+tw16 # b.sin
+    fsub r3, rb_tw_im+TW16_ACTIVE+3, r3; fmul r0, r2, ra_tw_re+tw16 # a.cos
+    fadd r2, r0, r1;
+    fsub r2, ra_tw_re+TW16_ACTIVE+3, r2
+
+    unpack_twiddles
+.endm
+
+##############################################################################
+# Alternate input/output buffers between stages
+
+.macro swap_buffers
+    mov rb_addr_y, ra_addr_x; mov ra_addr_x, rb_addr_y
+.endm
+
+##############################################################################
+# Reset counters and twiddles
+
+.macro init_stage_32, tw32
+    mov ra_tw_re+TW32_ACTIVE, ra_tw_re+tw32; mov rb_tw_im+TW32_ACTIVE, rb_tw_im+tw32
+.endm
+
+.macro init_stage_16, tw16, m
+    mov r2, ra_tw_re+tw16; mov r3, rb_tw_im+tw16
+    unpack_twiddles
+    mov r0, rb_inst
+    # (MM) Optimized: better use of both ALUs
+    shl r0, r0, m;   mov ra_points, 0  
+    add ra_load_idx, r0, elem_num
+    mov ra_save_ptr, rb_addr_y
+.endm
+
+##############################################################################
+
+.set LOAD_STRAIGHT, 0
+.set LOAD_REVERSED, 1
+
+.macro loader_16, stride, mode
+    .if mode==LOAD_REVERSED
+        load_rev stride, r:fft_16
+    .else
+        load_lin stride, r:fft_16
+    .endif
+.endm
+
+.macro body_pass_16, mode
+    loader_16 rb_0x80, mode
+    # (MM) Optimized: easier procedure chains
+    brr -, r:save_16, ra_save_16
+    nop
+    mov ra_vpm_lo, rb_vpm_lo; mov rb_vpm_lo, ra_vpm_lo
+    mov ra_vdw_16, rb_vdw_16; mov rb_vdw_16, ra_vdw_16
+.endm
+
+.macro body_pass_32, mode
+    loader_16 rb_0xF0, mode
+    mov ra_32_re, r0; mov rb_32_im, r1
+    loader_16 rb_0x10, mode
+    fft_twiddles_32
+    # (MM) Optimized: easier procedure chains
+    brr -, r:save_32, ra_save_32
+    mov ra_vpm_lo, rb_vpm_lo; mov rb_vpm_lo, ra_vpm_lo
+    mov ra_vpm_hi, rb_vpm_hi; mov rb_vpm_hi, ra_vpm_hi
+    mov ra_vdw_32, rb_vdw_32; mov rb_vdw_32, ra_vdw_32
+.endm
+
+.macro body_pass_64, mode, step
+    loader_16 rb_0x10, mode
+    mov ra_32_re, r0; mov rb_32_im, r1
+    loader_16 rb_0x10, mode
+    fft_twiddles_32
+
+    fadd ra_64+0, ra_32_re, r0
+    fadd ra_64+1, rb_32_im, r1
+    fsub ra_64+2, ra_32_re, r0
+    fsub ra_64+3, rb_32_im, r1
+
+    loader_16 step, mode
+    mov ra_32_re, r0; mov rb_32_im, r1
+    loader_16 rb_0x10, mode
+    fft_twiddles_32
+
+    # (MM) Optimized: better use of both ALUs and accumulators
+    fadd r3, rb_32_im, r1
+    fsub rb_32_im, rb_32_im, r1; fmul r1, r3, ra_tw_re+TW64_P1_BASE0 # ir
+    fadd r2, ra_32_re, r0;       fmul r3, r3, rb_tw_im+TW64_P1_BASE0 # ii
+    fsub ra_32_re, ra_32_re, r0; fmul r0, r2, rb_tw_im+TW64_P1_BASE0 # ri
+    fadd rb_64+1, r0, r1;        fmul r2, r2, ra_tw_re+TW64_P1_BASE0 # rr
+    fsub rb_64+0, r2, r3;        fmul r0, ra_32_re, rb_tw_im+TW64_P1_BASE1 # ri
+    mov r3, rb_32_im;            fmul r1, rb_32_im, ra_tw_re+TW64_P1_BASE1 # ir
+    # (MM) Optimized: easier procedure chains
+    brr -, r:save_64, ra_save_64
+    mov r2, ra_32_re;            fmul r3, r3, rb_tw_im+TW64_P1_BASE1 # ii
+    fadd rb_64+3, r0, r1;        fmul r2, r2, ra_tw_re+TW64_P1_BASE1 # rr
+    fsub rb_64+2, r2, r3
+.endm
+
+##############################################################################
+
+.macro exit, flag
+    # (MM) Optimized: no need to wait with thrend
+    mov interrupt, flag; thrend
+    nop
+    nop
+.endm
+
+##############################################################################
