@@ -68,12 +68,12 @@ The heart of the software. It assembles QPU code to binary or C
 ### File arguments
 
 You can pass _multiple files_ to <tt>vc4asm</tt> but this will not
-      create separate object modules. Instead the files are simply concatenated
-      in order of appearance. You may use this feature to include platform
-      specific definitions without the need to include them explicitly from
-      every file. E.g.:
+create separate object modules. Instead the files are simply concatenated
+in order of appearance. You may use this feature to include platform
+specific definitions without the need to include them explicitly from
+every file. E.g.:
 
-      <tt>vc4asm -o code.bin BCM2835.qinc gpu_fft_1k.qasm</tt>
+```vc4asm -o code.bin BCM2835.qinc gpu_fft_1k.qasm```
 
 ### Assembler reference
 
