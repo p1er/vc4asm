@@ -22,8 +22,8 @@ The goal of the vc4asm project is a **full featured
 
 ## Download &amp; history
 
-Download [Source code, Raspberry Pi binary,
-        examples and this documentation](../vc4asm.tar.bz2) (100k)
+You can clone this repository or the original code can be found 
+[here](http://maazl.de/project/vc4asm/vc4asm.tar.bz2) 
 
     <dl>
       <dt>V0.1</dt>
