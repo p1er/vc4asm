@@ -87,7 +87,9 @@ See the [Broadcom
 
 ## <a id="vc4dis" name="vc4dis"></a>Disassembler <tt>vc4dis</tt>
 
-    vc4dis [-o <qasm-output>] [-x[<input-format>]] [-M] [-F] [-v] [-b <base-addr>] <input-file> [<input-file2> ...]
+```
+vc4dis [-o <qasm-output>] [-x[<input-format>]] [-M] [-F] [-v] [-b <base-addr>] <input-file> [<input-file2> ...]
+```
 
 ### Options
 
@@ -129,17 +131,17 @@ See the [Broadcom
 ### File arguments
 
 If you pass multiple input files they are disassembled all together into
-      a single result as if they were concatenated.
+a single result as if they were concatenated.
 
-      The format of the input is controlled by the <tt>-x</tt> option. All
-      input files must use the same format.
+The format of the input is controlled by the <tt>-x</tt> option. All
+input files must use the same format.
 
 ## <a id="build" name="build"></a>Build instructions
 
 The source code has hopefully no major platform dependencies, i.e. you
-      don't need to build it on the Raspberry. But it requires a [C++11](https://en.wikipedia.org/wiki/C++11)
-      compliant compiler to build. So Raspbian Wheezy is not sufficient. In fact
-      I only tested with gcc 4.8/4.9.
+don't need to build it on the Raspberry. But it requires a [C++11](https://en.wikipedia.org/wiki/C++11)
+compliant compiler to build. So Raspbian Wheezy is not sufficient. In fact
+I only tested with gcc 4.8/4.9.
 
 *   Download and extract the source.
 *   Go to folder <tt>src</tt>.
@@ -150,15 +152,15 @@ The source code has hopefully no major platform dependencies, i.e. you
 ## <a id="sample" name="sample"></a>Sample programs
 
 All sample programs require _root access_ to run. This is because
-      of the need to call <tt>mmap</tt>.
+of the need to call <tt>mmap</tt>.
 
 Furthermore you need to create a local character device named <tt>char_dev</tt>
-      to access the vcio driver of the Raspi kernel: <tt>sudo mknod char_dev c
-        100 0</tt>
+to access the vcio driver of the Raspi kernel: <tt>sudo mknod char_dev c
+  100 0</tt>
 
-      The latter won't work if you are at an nfs share or something like that.
-      In this case create the device in the root file system e.g. <tt>/dev/vcio</tt>
-      and place a symbolic link to the device with <tt>ln -s /dev/vcio char_dev</tt>.
+The latter won't work if you are at an nfs share or something like that.
+In this case create the device in the root file system e.g. <tt>/dev/vcio</tt>
+and place a symbolic link to the device with <tt>ln -s /dev/vcio char_dev</tt>.
 
 All these restrictions apply to the original <tt>hello_fft</tt> as well.
 
@@ -170,8 +172,8 @@ This is a very simple program that demonstrates the use of all available
 ### hello_fft
 
 This is the well known hello_fft sample available. The only difference is
-      that it is faster because the shader code has been optimized. The gain is
-      about 10% of code size and about 3% of the run time.
+that it is faster because the shader code has been optimized. The gain is
+about 10% of code size and about 3% of the run time.
 
 ## <a id="contact" name="contact"></a>Contact
 
