@@ -52,27 +52,27 @@
 # Registers
 
 .set ra_link_0,         ra0
-.set rb_vpm,            rb0
+#                       rb0
 .set ra_save_ptr,       ra1
-.set rb_vpm_16,         rb1
+.set rx_vpm,            rb1
 .set ra_temp,           ra2
-.set rb_vpm_32,         rb2
+#                       rb2
 .set ra_addr_x,         ra3
 .set rb_addr_y,         rb3
-.set ra_save_32,        ra4
-#
+.set rx_inst,           ra4
+#                       rb4
 .set ra_load_idx,       ra5
-.set rb_inst,           rb5
+#                       rb5
 .set ra_sync,           ra6
 #
 .set ra_points,         ra7
-.set rb_vpm_48,         rb7
+#                       rb7
 .set ra_link_1,         ra8
 #                       rb8
 .set ra_32_re,          ra9
 .set rb_32_im,          rb9
-.set ra_save_64,        ra10
-#
+.set ra_vdw_32,         ra10
+#                       rb10
 
 .set ra_64,             ra11 # 4
 .set rb_64,             rb11 # 4
@@ -83,35 +83,24 @@
 .set rx_0x5555,         ra28
 .set rx_0x3333,         ra29
 .set rx_0x0F0F,         ra30
-.set rx_0x00FF,         ra31
+#                       ra31
 
-.set rb_0x10,           rb28
-.set rb_0x40,           rb29
+#                       rb28
+#                       rb29
 .set rb_0xF0,           rb30
 .set rb_0x1D0,          rb31
 
 ##############################################################################
-# Dual-use registers
-
-.set ra_vpm_lo,         ra_64+0
-.set ra_vpm_hi,         ra_64+1
-.set rb_vpm_lo,         rb_vpm_32
-.set rb_vpm_hi,         rb_vpm_48
-.set ra_vdw_32,         ra_64+2
-.set rb_vdw_32,         rb_64+2
-
-##############################################################################
 # Constants
 
-mov rb_0x10,    0x10
-mov rb_0x40,    0x40
 mov rb_0xF0,    0xF0
 mov rb_0x1D0,   0x1D0
 
 mov rx_0x5555,  0x5555
 mov rx_0x3333,  0x3333
 mov rx_0x0F0F,  0x0F0F
-mov rx_0x00FF,  0x00FF
+
+mov ra_vdw_32, vdw_setup_0(32, 16, dma_h32( 0,0))
 
 ##############################################################################
 # Load twiddle factors
@@ -124,17 +113,14 @@ load_tw r3, TW_SHARED, TW_UNIQUE, unif
 # Instance
 
 # (MM) Optimized: better procedure chains
-# Saves several branch instructions and 3 rb registers
+# Saves several branch instructions and 5 registers
     mov.setf r3, unif;  mov ra_sync, 0
-    mov rb_inst, r3;    mov ra_save_32, 0
-    shl r0, r3, 5;      mov ra_save_64, 0
-    mov.ifnz r1,         :sync_slave    - :sync    - 4*8 # -> rb_inst-1
-    add.ifnz ra_sync, r1, r0
-    mov.ifnz ra_save_32, :save_slave_32 - :save_32
-    mov.ifnz r1,         :save_slave_64 - :save_64 - 4*8 # -> rb_inst-1
-    add.ifnz ra_save_64, r1, r0
+    shl r0, r3, 5;      mov rx_inst, r3
+    mov r1, :sync_slave - :sync - 4*8 # -> rx_inst-1
+    add.ifnz ra_sync, r1, r0;
 
-inst_vpm r3, rb_vpm, rb_vpm_16, rb_vpm_32, rb_vpm_48
+# (MM) Optimized: reduced VPM registers to 1
+inst_vpm r3, rx_vpm
 
 ##############################################################################
 # Macros
@@ -156,16 +142,16 @@ inst_vpm r3, rb_vpm, rb_vpm_16, rb_vpm_32, rb_vpm_48
 # Top level
 
 :loop
-    mov.setf ra_addr_x, unif # Ping buffer or null
+    mov.setf ra_addr_x, unif  # Ping buffer or null
     # (MM) Optimized: branch sooner
     brr.allz -, r:end
-    mov      rb_addr_y, unif # Pong buffer or IRQ enable
+    mov      rb_addr_y, unif; # Pong buffer or IRQ enable
 
 ##############################################################################
 # Pass 1
 
     init_stage 6, TW16_P1_BASE, TW32_P1_BASE
-    read_rev rb_0x10
+    read_rev 0x10
     
     # (MM) Optimized: place branch before the last two instructions of read_rev
     .back 2
@@ -173,7 +159,7 @@ inst_vpm r3, rb_vpm, rb_vpm_16, rb_vpm_32, rb_vpm_48
     .endb
     mov ra_points, (1<<STAGES) / 0x200 - 1
 
-# :start of hidden loop
+:   # start of hidden loop
     # (MM) Optimized: branch unconditional and patch the return address
     # for the last turn.
     brr r0, r:pass_1
@@ -188,20 +174,11 @@ inst_vpm r3, rb_vpm, rb_vpm_16, rb_vpm_32, rb_vpm_48
     ldtmu0
 
 ##############################################################################
-# Dual-use registers
-
-    mov ra_vpm_lo, rb_vpm
-    mov ra_vpm_hi, rb_vpm_16
-
-    mov ra_vdw_32, vdw_setup_0(32, 16, dma_h32( 0,0))
-    mov rb_vdw_32, vdw_setup_0(32, 16, dma_h32(32,0))
-
-##############################################################################
 # Pass 2
 
     swap_buffers
     init_stage 5, TW16_P2_BASE, TW32_P2_BASE
-    read_lin rb_0x10
+    read_lin 0x10
 
     # (MM) Optimized: place branch before the last two instructions of read_lin
     .back 2
@@ -209,7 +186,7 @@ inst_vpm r3, rb_vpm, rb_vpm_16, rb_vpm_32, rb_vpm_48
     .endb
     mov ra_points, (1<<STAGES) / 0x100 - 1
 
-# :start of hidden loop
+:   # start of hidden loop
     next_twiddles TW16_P2_STEP, TW32_P2_STEP
 
     # (MM) Optimized: branch unconditional and patch the return address for
@@ -235,35 +212,49 @@ inst_vpm r3, rb_vpm, rb_vpm_16, rb_vpm_32, rb_vpm_48
 
 # (MM) Optimized: easier procedure chains
 ##############################################################################
-# Master/slave procedures
-
-:save_32
-    body_ra_save_32
-
-:save_slave_32
-    body_rx_save_slave_32
-
-:save_64
-    body_ra_save_64 rb_0x40
-
-:save_slave_64
-    body_rx_save_slave_64
-
-:sync
-    body_ra_sync
-
-:sync_slave
-    body_rx_sync_slave
-
-##############################################################################
 # Subroutines
 
-:fft_16
-    body_fft_16
+# (MM) Optimized: joined load_xxx and ldtmu in FFT-16 codelet
+bodies_fft_16
+    .back 3
+    bra -, ra_link_0
+    .endb
 
 :pass_1
     body_pass_64 LOAD_REVERSED, rb_0x1D0
 
+    # (MM) Optimized: link to slave procedure without need for a register
+    .back 4
+    ;shl.setf ra_temp, rx_inst, 5    # 4 instructions per instance
+    .endb
+    .back 3
+    brr.allnz -, ra_temp, r:save_slave_64 - 4*8 # + (rx_inst-1) * 4*8
+    .endb
+
+    body_ra_save_64
+
+:save_slave_64
+    body_rx_save_slave_64
+
+:sync_slave
+    body_rx_sync_slave
+
+:sync
+    body_ra_sync
+
 :pass_2
     body_pass_32 LOAD_STRAIGHT
+
+    # (MM) Optimized: link to slave procedure without need for a register
+    .back 9  # place deep inside fft_twiddles
+    ;mov.setf -, rx_inst;
+    .endb
+    .back 3
+    brr.allnz -, r:save_slave
+    .endb
+
+    body_ra_save_32
+
+:save_slave
+    body_rx_save_slave
 

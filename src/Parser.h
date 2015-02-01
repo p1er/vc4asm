@@ -22,9 +22,23 @@
 
 using namespace std;
 
+/// Find the first occurrence of key
 template <typename T, size_t N>
 inline T* binary_search(T (&arr)[N], const char* key)
-{	return (T*)bsearch(key, &arr, N, sizeof(T), (int (*)(const void*, const void*))&strcmp);
+{	size_t l = 0;
+	size_t r = N;
+	int nohit = -1;
+	while (l < r)
+	{	size_t m = (l+r) >> 1;
+		int cmp = strcmp(key, (const char*)(arr + m));
+		if (cmp > 0)
+			l = m + 1;
+		else
+		{	r = m;
+			nohit &= cmp;
+		}
+	}
+	return nohit ? NULL : arr + r;
 }
 
 class Parser
@@ -78,6 +92,16 @@ class Parser
 		uint8_t     SImmd;   ///< small immediate to achieve this result
 		opAddMul    OpCode;  ///< ALU opcode to achieve this result
 	}             smiMap[];
+	enum InstContext : uint8_t
+	{	IC_NONE          = 0
+	,	IC_MUL           = 1
+	,	IC_SRC           = 2
+	,	IC_MULSRC        = 3
+	,	IC_DST           = 4
+	,	IC_MULDST        = 5
+	,	IC_SRCB          = 10
+	,	IC_MULSRCB       = 11
+	};
 
 	enum contextType
 	{	CTX_ROOT
@@ -91,14 +115,6 @@ class Parser
 	,	PP_IF    = 2
 	,	PP_ALL   = 3
 	};
-	/*template <typename... P>
-	class dispatchHelper
-	{	void (Parser::*const Func(P));
-		P Args;
-	 public:
-		dispatchHelper(void (Parser::*func)(P), P args) : Func(func), Args(args) {}
-		void operator()(Parser& that) { that.*Func(Args); }
-	};*/
 	template <size_t L>
 	struct opEntry
 	{	char Name[L];
@@ -107,15 +123,15 @@ class Parser
 	};
 	static const opEntry<8> opcodeMap[];
 	enum opExtFlags
-	{	E_SRC   = 0x01,
-		E_DST   = 0x02,
-		E_OP    = 0x04,
-		E_SRCOP = 0x05,
-		E_DSTOP = 0x06,
+	{	E_SRC   = 0x01
+	,	E_DST   = 0x02
+	,	E_OP    = 0x04
+	,	E_SRCOP = 0x05
+	,	E_DSTOP = 0x06
 	};
 	struct opExtEntry
 	{	char           Name[16];
-		void (Parser::*Func)(int,bool);
+		void (Parser::*Func)(int,InstContext);
 		int            Arg;
 		opExtFlags     Flags;
 	};
@@ -195,6 +211,22 @@ class Parser
 		saveLineContext(Parser& parent, fileContext* ctx);
 		~saveLineContext();
 	};
+	enum InstFlags : uint8_t
+	{	IF_NONE          = 0
+	,	IF_HAVE_NOP      = 1        ///< at least one NOP in the current instruction so far
+	,	IF_CMB_ALLOWED   = 2        ///< Instruction of the following line could be merged
+	,	IF_BRANCH_TARGET = 4        ///< This instruction is a branch target
+	};
+
+	template <typename T, T def>
+	class vector_safe : public vector<T>
+	{public:
+		typename vector<T>::reference operator[](typename vector<T>::size_type n)
+		{	if (n >= vector<T>::size())
+				vector<T>::resize(n+1, def);
+			return vector<T>::operator[](n);
+		}
+	};
 
 	// parser working set
 	bool             Pass2 = false;
@@ -203,8 +235,8 @@ class Parser
 	char             Line[1024];  ///< Buffer for line input. Well, static size...
 	char*            At = NULL;   ///< Current location within Line
 	string           Token;       ///< Current token
-	Inst             Instruct;    ///< current instruction
-	bool             HaveNOP;     ///< at least one NOP in the current line so far
+	Inst             Instruct;    ///< Current instruction
+	unsigned         PC;          ///< Current program counter
 	// context
 	macro*           AtMacro = NULL;///< Currently at a macro definition
 	unsigned         Back = 0;    ///< Insert # instructions in the past
@@ -218,12 +250,18 @@ class Parser
 	macros_t         MacroFuncs;  ///< Multi line function definitions
 	macros_t         Macros;      ///< Macros
 	// instruction
-	vector<uint64_t> Instructions;
+	vector_safe<uint64_t,0> Instructions;
+	vector_safe<uint8_t,IF_NONE> InstFlags;
  private:
 	string           enrichMsg(string msg);
 	void             Fail(const char* fmt, ...) PRINTFATTR(2) NORETURNATTR;
-	void             Error(const char* fmt, ...) PRINTFATTR(2);
 	void             Msg(severity level, const char* fmt, ...) PRINTFATTR(3);
+
+	/// Ensure minimum size of InstFlags array.
+	void             FlagsSize(size_t min);
+	uint8_t&         Flags() { return InstFlags[PC]; }
+
+	void             StoreInstruction(uint64_t value);
 
 	token_t          NextToken();
 	/// Work around for gcc on 32 bit Linux that can't read "0x80000000" with sscanf anymore.
@@ -238,16 +276,16 @@ class Parser
 	void             doSMI(uint8_t si);
 
 	// OP code extensions
-	void             addIf(int cond, bool mul);
-	void             addUnpack(int mode, bool mul);
-	void             addPack(int mode, bool mul);
-	void             addSetF(int, bool mul);
-	void             addCond(int cond, bool mul);
-	void             addRot(int, bool mul);
-	void             doInstrExt(bool mul);
+	void             addIf(int cond, InstContext ctx);
+	void             addUnpack(int mode, InstContext ctx);
+	void             addPack(int mode, InstContext ctx);
+	void             addSetF(int, InstContext ctx);
+	void             addCond(int cond, InstContext ctx);
+	void             addRot(int, InstContext ctx);
+	void             doInstrExt(InstContext ctx);
 
 	void             doALUTarget(exprValue param, bool mul);
-	Inst::mux        doALUExpr(bool mul);
+	Inst::mux        doALUExpr(InstContext ctx);
 	void             doBRASource(exprValue param);
 
 	// OP codes
@@ -268,6 +306,7 @@ class Parser
 	void             endREP(int);
 	void             beginBACK(int);
 	void             endBACK(int);
+	void             parseCLONE(int);
 	void             parseSET(int flags);
 	void             parseUNSET(int flags);
 	bool             doCondition();

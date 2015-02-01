@@ -45,18 +45,18 @@
 ##############################################################################
 # Registers
 
-.set ra_link_0,         ra0
+.set rx_inst,           ra0
 #                       rb0
 .set ra_save_ptr,       ra1
 #                       rb1
 .set ra_temp,           ra2
-#
+.set rx_vpm,            rb2
 .set ra_addr_x,         ra3
 .set rb_addr_y,         rb3
 .set ra_save_16,        ra4
 #
 .set ra_load_idx,       ra5
-.set rb_inst,           rb5
+#                       rb5
 .set ra_sync,           ra6
 #
 .set ra_points,         ra7
@@ -66,30 +66,30 @@
 .set ra_tw_re,          ra9
 .set rb_tw_im,          rb9
 
-.set ra_vpm,            ra27
-.set rb_vpm,            rb27
+#                       ra27
+#                       rb27
 .set ra_vdw,            ra28
 .set rb_vdw,            rb28
 
-.set rx_0x5555,         ra29
+.set rb_0x5555,         rb29
 .set rx_0x3333,         ra30
 .set rx_0x0F0F,         ra31
 
-.set rb_0x40,           rb30
+#                       rb30
 .set rb_0x80,           rb31
 
 ##############################################################################
 # Constants
 
-mov rb_0x40,    0x40
 mov rb_0x80,    0x80
 
-mov rx_0x5555,  0x5555
+mov rb_0x5555,  0x5555
 mov rx_0x3333,  0x3333
 mov rx_0x0F0F,  0x0F0F
 
 mov ra_vdw, vdw_setup_0(16, 16, dma_h32( 0,0))
-mov rb_vdw, vdw_setup_0(16, 16, dma_h32(16,0))
+# (MM) Optimized: use xor for vpm swap (less memory I/O, save A register)
+mov rb_vdw, vdw_setup_0(16, 16, dma_h32(16,0)) - vdw_setup_0(16, 16, dma_h32( 0,0))
 
 ##############################################################################
 # Load twiddle factors
@@ -102,26 +102,26 @@ load_tw rb_0x80, TW_SHARED, TW_UNIQUE, unif
 
 # (MM) Optimized: better procedure chains
 # Saves several branch instructions and 2 registers
-    shl.setf r0, unif, 5; mov r3, unif
-    # get physical address for ra_link_0
-    brr r2, 0
-    mov r1, :save_16 - :0f
-    add r2, r2, r1;       mov ra_save_16, 0
-    mov rb_inst, r3;      mov ra_sync, 0
-:0  mov r1, :sync_slave - :sync - 4*8 # -> rb_inst-1
-    mov.ifnz ra_save_16,  :save_slave_16 - :save_16
+    mov r3, unif;              mov ra_save_16, 0
+    shl.setf r0, r3, 5;        mov ra_sync, 0
+    mov.ifnz r1, :sync_slave - :sync - 4*8 # -> rx_inst-1
     add.ifnz ra_sync, r1, r0
-    # absolute address of save_16
-    add ra_link_0, r2, ra_save_16
+    mov.ifnz r1, :save_slave - :save_16
+    mov.ifnz ra_save_16, r1;
+    
+# (MM) Optimized: reduced VPM registers to 1
+inst_vpm r3, rx_vpm
 
-inst_vpm r3, ra_vpm, rb_vpm, -, -
+    ;mov rx_inst, r3
 
 ##############################################################################
 # Macros
 
+# (MM) no longer used
 .macro swap_vpm_vdw
-    mov ra_vpm, rb_vpm; mov rb_vpm, ra_vpm
-    mov ra_vdw, rb_vdw; mov rb_vdw, ra_vdw
+    # (MM) Optimized: use xor for vpm swap (less memory I/O) and save A register
+    xor ra_vdw, ra_vdw, rb_vdw;  mov r2, vpm_setup(1, 1, v32(16,0)) - vpm_setup(1, 1, v32(0,0))
+    xor ra_vpm, ra_vpm, r2;
 .endm
 
 .macro next_twiddles, tw16
@@ -136,44 +136,48 @@ inst_vpm r3, ra_vpm, rb_vpm, -, -
 # Redefining this macro
 
 .macro read_rev, stride
-    add ra_load_idx, ra_load_idx, stride; mov r0, ra_load_idx
+    and r1, ra_load_idx, rb_0x5555; mov r2, ra_load_idx
+    shr r0, r2, 1
+    and r0, r0, rb_0x5555; v8adds r1, r1, r1 # can't overflow because of mask
+    mv8adds r0, r0, r1;                      # can't overflow because of mask
+    .if stride != 0
+    # (MM) Optimized: join stride with v8adds
+    ;add ra_load_idx, r2, stride
+    .endif
 
-    bit_rev 1, rx_0x5555    # 16 SIMD
     bit_rev 2, rx_0x3333
     bit_rev 4, rx_0x0F0F
-
-    shl r0, r0, 3           # {idx[0:7], 1'b0, 2'b0}
-    add r1, r0, 4           # {idx[0:7], 1'b1, 2'b0}
-
-    add t0s, ra_addr_x, r0
-    add t0s, ra_addr_x, r1
+    
+    shl r0, r0, 3
+    add t0s, r0, ra_addr_x; v8adds r1, ra_addr_x, 4 # {idx[0:7], 1'b0, 2'b0}
+    add t0s, r0, r1                                 # {idx[0:7], 1'b1, 2'b0}
 .endm
 
 ##############################################################################
 # Top level
 
 :loop
-    mov.setf ra_addr_x, unif # Ping buffer or null
+    mov.setf ra_addr_x, unif  # Ping buffer or null
     # (MM) Optimized: branch earlier
     brr.allz -, r:end
-    mov      rb_addr_y, unif # Pong buffer or IRQ enable
+    mov      rb_addr_y, unif; # Pong buffer or IRQ enable
 
 ##############################################################################
 # Pass 1
 
     init_stage TW16_P1_BASE
     read_rev rb_0x80
-    read_rev rb_0x80
+    read_rev 0
+    # (MM) Optimized: move swap_vpm_vdw to pass1/2
+
     # (MM) Optimized: move branch before the last instruction of read_rev
-    .back 1
+    .back 3
     brr ra_link_1, r:pass_1
     .endb
-    swap_vpm_vdw
 
-# :start of hidden loop
-    brr ra_link_1, r:pass_1
-    nop
-    swap_vpm_vdw
+    brr ra_link_1, r:pass_1 + 8 * 3
+    # (MM) Optimized: move swap_vpm_vdw to pass1/2
+    .clone :pass_1, 3
     
     # (MM) Optimized: easier procedure chains
     brr ra_link_1, r:sync, ra_sync
@@ -187,19 +191,19 @@ inst_vpm r3, ra_vpm, rb_vpm, -, -
     swap_buffers
     init_stage TW16_P2_BASE
     read_lin rb_0x80
-    read_lin rb_0x80
-    # (MM) Optimized: move branch before the last instruction of read_lin
-    .back 1
+    read_lin 0
+    # (MM) Optimized: move swap_vpm_vdw to pass1/2
+    # (MM) Optimized: move branch before the last instructions of read_lin
+    .back 3
     brr ra_link_1, r:pass_2
     .endb
-    swap_vpm_vdw
 
     next_twiddles TW16_P2_STEP
-    # (MM) Optimized: move branch before the last instruction of next_twiddles
-    .back 1
+    # (MM) Optimized: move swap_vpm_vdw to pass1/2
+    # (MM) Optimized: move branch before the last instructions of next_twiddles
+    .back 3
     brr ra_link_1, r:pass_2
     .endb
-    swap_vpm_vdw
 
     # (MM) Optimized: easier procedure chains
     brr r0, r:sync, ra_sync
@@ -216,28 +220,36 @@ inst_vpm r3, ra_vpm, rb_vpm, -, -
 
 # (MM) Optimized: easier procedure chains
 ##############################################################################
-# Master/slave procedures
-
-:save_16
-    body_ra_save_16 ra_vpm, ra_vdw
-
-:save_slave_16
-    body_rx_save_slave_16 ra_vpm
-
-:sync
-    body_ra_sync
-
-:sync_slave
-    body_rx_sync_slave
-
-##############################################################################
 # Subroutines
 
 :pass_1
 :pass_2
-    nop;        ldtmu0
-    mov r0, r4; ldtmu0
-    mov r1, r4
-:fft_16
-    body_fft_16
+    body_fft_16_lin
+
+    # (MM) Optimized: move swap_vpm_vdw to pass1/2
+    # (MM) Optimized: use xor for vpm swap (less memory I/O, save A register)
+    ;mov r2, vpm_setup(1, 1, v32(16,0)) - vpm_setup(1, 1, v32(0,0))
+   
+    # (MM) Optimized: move write_vpm_16 to body_pass_16
+    # and expand inline to pack with VPM swap code, saves 2 instructions
+    xor vw_setup, rx_vpm, r2;      mov r3, rx_vpm
+    xor rx_vpm,   r3,     r2;      mov vpm, r0
+    xor ra_vdw,   ra_vdw, rb_vdw;  mov vpm, r1
+
+    # (MM) Optimized: link directly to save_16
+    .back 3
+    brr -, ra_save_16, r:save_16
+    .endb
+
+:save_16
+    body_ra_save_16 ra_vdw
+
+:save_slave
+    body_rx_save_slave
+
+:sync_slave
+    body_rx_sync_slave
+
+:sync
+    body_ra_sync
 

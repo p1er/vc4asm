@@ -1,5 +1,5 @@
 /*
-BCM2835 "GPU_FFT" release 2.0 BETA
+BCM2835 "GPU_FFT" release 2.0
 Copyright (c) 2014, Andrew Holme.
 All rights reserved.
 
@@ -29,6 +29,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gpu_fft.h"
 #include "mailbox.h"
 
+#include <time.h>
+
 #define PERI_BASE 0x20000000
 #define PERI_SIZE 0x02000000
 
@@ -46,13 +48,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define GPU_FFT_MEM_MAP 0x0 // cached=0x0; direct=0x20000000
 
 #define GPU_FFT_NO_FLUSH 1
-#define GPU_FFT_TIMEOUT 1000 // ms
+#define GPU_FFT_TIMEOUT 2000 // ms
 
 unsigned gpu_fft_base_exec_direct (
     struct GPU_FFT_BASE *base,
     int num_qpus) {
 
     unsigned q, t;
+    time_t limit = 0;
 
     base->peri[V3D_DBCFG] = 0; // Disallow IRQ
     base->peri[V3D_DBQITE] = 0; // Disable IRQ
@@ -70,10 +73,17 @@ unsigned gpu_fft_base_exec_direct (
 
     // Busy wait polling
     for (;;) {
-        if (((base->peri[V3D_SRQCS]>>16) & 0xff) == num_qpus) break; // All done?
+        q = 1000;
+        do
+            if (((base->peri[V3D_SRQCS]>>16) & 0xff) == num_qpus) // All done?
+                return 0;
+        while (--q);
+        if (!limit)
+        	limit = clock() + CLOCKS_PER_SEC * GPU_FFT_TIMEOUT / 1000;
+        else if (clock() >= limit)
+            // TODO: some cleanup required?
+            return -1;
     }
-
-    return 0;
 }
 
 unsigned gpu_fft_base_exec(
@@ -82,6 +92,7 @@ unsigned gpu_fft_base_exec(
 
     if (base->vc_msg) {
         // Use mailbox
+        // Returns: 0x0 for success; 0x80000000 for timeout
         return execute_qpu(base->mb, num_qpus, base->vc_msg, GPU_FFT_NO_FLUSH, GPU_FFT_TIMEOUT);
     }
     else {

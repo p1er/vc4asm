@@ -52,13 +52,13 @@
 .set ra_save_ptr,       ra1
 #                       rb1
 .set ra_temp,           ra2
-#                       rb2
+.set rx_vpm,            rb2
 .set ra_addr_x,         ra3
 .set rb_addr_y,         rb3
 .set ra_save_16,        ra4
 #
 .set ra_load_idx,       ra5
-.set rb_inst,           rb5
+#                       rb5
 .set ra_sync,           ra6
 #
 .set ra_points,         ra7
@@ -69,33 +69,39 @@
 .set ra_tw_re,          ra9
 .set rb_tw_im,          rb9
 
-.set ra_vpm,            ra26
-.set rb_vpm,            rb26
+#                       ra26
+#                       rb26
 .set ra_vdw,            ra27
 .set rb_vdw,            rb27
 
 .set rx_0x5555,         ra28
 .set rx_0x3333,         ra29
 .set rx_0x0F0F,         ra30
-.set rx_0x00FF,         ra31
+.set rx_inst,           ra31
 
 .set rb_pass2_link,     rb29
-.set rb_0x40,           rb30
+#                       rb30
 .set rb_0x80,           rb31
+
+##############################################################################
+# Redefine compile time constants
+
+# (MM) Optimized: extracted stride from load_xxx to make read part of a procedure
+# Redo this for the 4k FFT
+.set DEF_STRIDE,        rb_0x80
 
 ##############################################################################
 # Constants
 
-mov rb_0x40,    0x40
 mov rb_0x80,    0x80
 
 mov rx_0x5555,  0x5555
 mov rx_0x3333,  0x3333
 mov rx_0x0F0F,  0x0F0F
-mov rx_0x00FF,  0x00FF
 
 mov ra_vdw, vdw_setup_0(16, 16, dma_h32( 0,0))
-mov rb_vdw, vdw_setup_0(16, 16, dma_h32(16,0))
+# (MM) Optimized: use xor for vpm swap (less memory I/O, save A register)
+mov rb_vdw, vdw_setup_0(16, 16, dma_h32(16,0)) - vdw_setup_0(16, 16, dma_h32( 0,0))
 
 ##############################################################################
 # Load twiddle factors
@@ -108,26 +114,26 @@ load_tw rb_0x80, TW_SHARED, TW_UNIQUE, unif
 
 # (MM) Optimized: better procedure chains
 # Saves several branch instructions and 2 registers
-    shl.setf r0, unif, 5; mov r3, unif
-    # get physical address for ra_link_0
-    brr r2, 0
-    mov r1, :save_16 - :0f
-    add r2, r2, r1;       mov ra_save_16, 0
-    mov rb_inst, r3;      mov ra_sync, 0
-:0  mov r1, :sync_slave - :sync - 4*8 # -> rb_inst-1
-    mov.ifnz ra_save_16,  :save_slave_16 - :save_16
+    mov r3, unif;         mov ra_save_16, 0
+    shl.setf r0, r3, 5;   mov ra_sync, 0
+    mov.ifnz r1, :sync_slave - :sync - 4*8 # -> rx_inst-1
     add.ifnz ra_sync, r1, r0
-    # absolute address of save_16
-    add ra_link_0, r2, ra_save_16
+    mov.ifnz r1, :save_slave - :save_16
+    mov.ifnz ra_save_16, r1;
 
-inst_vpm r3, ra_vpm, rb_vpm, -, -
+# (MM) Optimized: reduced VPM registers to 1
+inst_vpm r3, rx_vpm
+
+    ;mov rx_inst, r3
 
 ##############################################################################
 # Macros
 
+# (MM) no longer used
 .macro swap_vpm_vdw
-    mov ra_vpm, rb_vpm; mov rb_vpm, ra_vpm
-    mov ra_vdw, rb_vdw; mov rb_vdw, ra_vdw
+    # (MM) Optimized: use xor for vpm swap (less memory I/O) and save A register
+    xor ra_vdw, ra_vdw, rb_vdw;  mov r2, vpm_setup(1, 1, v32(16,0)) - vpm_setup(1, 1, v32(0,0))
+    xor ra_vpm, ra_vpm, r2;
 .endm
 
 .macro swizzle
@@ -151,10 +157,10 @@ inst_vpm r3, ra_vpm, rb_vpm, -, -
 # Top level
 
 :loop
-    mov.setf ra_addr_x, unif # Ping buffer or null
+    mov.setf ra_addr_x, unif  # Ping buffer or null
     # (MM) Optimized: branch sooner
     brr.allz -, r:end
-    mov      rb_addr_y, unif # Pong buffer or IRQ enable
+    mov      rb_addr_y, unif; # Pong buffer or IRQ enable
 
 ##############################################################################
 # Pass 1
@@ -162,17 +168,23 @@ inst_vpm r3, ra_vpm, rb_vpm, -, -
     init_stage TW16_P1_BASE
     read_rev rb_0x80
 
-    brr ra_link_1, r:pass_1
-    swap_vpm_vdw
-    mov ra_points, (1<<STAGES) / 128 - 1
+    # (MM) Optimized: move swap_vpm_vdw to pass1/2/3
+    .back 2
+    # (MM) Optimized: extracted stride from load_xxx to make read part of a procedure
+    # This is basically the concept of the 4k FFT, so we call the FFT procedure directly.
+    brr ra_link_1, r:load_fft_16_rev
+    .endb
+    mov ra_points, (1<<STAGES) / 0x80 - 1
 
-# :start of hidden loop
+:   # start of hidden loop
+    # (MM) Optimized: move swap_vpm_vdw to pass1/2/3
+
     # (MM) Optimized: branch unconditional and patch the return address
     # for the last turn.
+    brr r0, r:load_fft_16_rev + 8
     sub.setf ra_points, ra_points, 1
-    brr r0, r:pass_1
-    swap_vpm_vdw
     mov.ifz ra_link_1, r0
+    .clone r:load_fft_16_rev, 1
 
     # (MM) Optimized: easier procedure chains
     brr ra_link_1, r:sync, ra_sync
@@ -187,27 +199,33 @@ inst_vpm r3, ra_vpm, rb_vpm, -, -
     init_stage TW16_P2_BASE
     read_lin rb_0x80
 
-    # (MM) Optimized: keep return address additionally in rb_link_1 for loop.
-    mov ra_points, (1<<STAGES) / 0x80 - 1
-    brr ra_link_1, rb_link_1, -, r:pass_2
-    swap_vpm_vdw
-    mov rb_pass2_link, :3f - :2f
+    # (MM) Optimized: move swap_vpm_vdw to pass1/2/3
 
-# :start of hidden loop
-    swap_vpm_vdw
+    .back 2
+    # (MM) Optimized: keep return address additionally in rb_link_1 for loop.
+    # (MM) Optimized: extracted stride from load_xxx to make read part of a procedure
+    # This is basically the concept of the 4k FFT, so we call the FFT procedure directly.
+    brr ra_link_1, rb_link_1, -, r:load_fft_16_lin
+    .endb
+    mov ra_points, (1<<STAGES) / 0x80 - 1
+
+:   # start of hidden loop
+    # (MM) Optimized: move swap_vpm_vdw to pass1/2/3
+
     # (MM) Optimized: patch the return address for the last turn to save the
     # conditional branch and the unecessary twiddle load after the last turn.
-    .back 1
-    brr ra_link_1, r0, -, r:pass_2
-    .endb
+    brr ra_link_1, r:load_fft_16_lin + 8
     sub.setf ra_points, ra_points, 2
-    add.ifn ra_link_1, r0, rb_pass2_link
+    mov.ifn ra_link_1, rb_pass2_link
+    .clone r:load_fft_16_lin, 1
 :2
     next_twiddles TW16_P2_STEP
 
-    brr -, r:pass_2
-    swap_vpm_vdw
-    mov ra_link_1, rb_link_1
+    ;mov ra_link_1, rb_link_1
+    # (MM) Optimized: move swap_vpm_vdw to pass1/2/3
+    .back 3
+    brr rb_pass2_link, r:load_fft_16_lin
+    .endb
 :3
     # (MM) Optimized: easier procedure chains
     brr ra_link_1, r:sync, ra_sync
@@ -222,17 +240,23 @@ inst_vpm r3, ra_vpm, rb_vpm, -, -
     init_stage TW16_P3_BASE
     read_lin rb_0x80
 
-    brr ra_link_1, r:pass_3
-    swap_vpm_vdw
-    mov ra_points, (1<<STAGES) / 0x80 - 1;
+    # (MM) Optimized: move swap_vpm_vdw to pass1/2/3
 
-# :start of hidden loop
+    .back 2
+    # (MM) Optimized: extracted stride from load_xxx to make read part of a procedure
+    # This is basically the concept of the 4k FFT, so we call the FFT procedure directly.
+    brr ra_link_1, r:load_fft_16_lin
+    .endb
+    mov ra_points, (1<<STAGES) / 0x80 - 1
+
+:   # start of hidden loop
     next_twiddles TW16_P3_STEP
-    swap_vpm_vdw
+    # (MM) Optimized: move swap_vpm_vdw to pass1/2/3
+
     # (MM) Optimized: branch unconditional and patch the return address for
     # the last turn, move the branch before the last instruction of swap_vpm_vdw.
     .back 1
-    brr r0, r:pass_2
+    brr r0, r:load_fft_16_lin
     .endb
     sub.setf ra_points, ra_points, 1
     mov.ifz ra_link_1, r0
@@ -254,38 +278,36 @@ inst_vpm r3, ra_vpm, rb_vpm, -, -
 ##############################################################################
 # Master/slave procedures
 
+##############################################################################
+# Subroutines
+
+# (MM) Optimized: joined load_xxx and ldtmu in FFT-16 codelet
+bodies_fft_16
+
+    # (MM) Optimized: move swap_vpm_vdw to pass1/2
+    # (MM) Optimized: use xor for vpm swap (less memory I/O, save A register)
+    ;mov r2, vpm_setup(1, 1, v32(16,0)) - vpm_setup(1, 1, v32(0,0))
+   
+    # (MM) Optimized: move write_vpm_16 to body_pass_16
+    # and expand inline to pack with VPM swap code, saves 2 instructions
+    xor vw_setup, rx_vpm, r2;      mov r3, rx_vpm
+    xor rx_vpm,   r3,     r2;      mov vpm, r0
+    xor ra_vdw,   ra_vdw, rb_vdw;  mov vpm, r1
+
+    # (MM) Optimized: link directly to save_16
+    .back 3
+    brr -, ra_save_16, r:save_16
+    .endb
+
 :save_16
-    body_ra_save_16 ra_vpm, ra_vdw
+    body_ra_save_16 ra_vdw
 
-:save_slave_16
-    body_rx_save_slave_16 ra_vpm
-
-:sync
-    body_ra_sync
+:save_slave
+    body_rx_save_slave
 
 :sync_slave
     body_rx_sync_slave
 
-##############################################################################
-# Subroutines
-
-:fft_16
-    body_fft_16
-
-:pass_1
-    read_rev rb_0x80
-    nop;        ldtmu0
-    mov r0, r4; ldtmu0
-    mov r1, r4
-    swizzle
-    brr -, r:fft_16
-    interleave
-
-:pass_2
-:pass_3
-    read_lin rb_0x80
-    brr -, r:fft_16
-    nop;        ldtmu0
-    mov r0, r4; ldtmu0
-    mov r1, r4
+:sync
+    body_ra_sync
 
