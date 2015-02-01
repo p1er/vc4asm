@@ -2,19 +2,21 @@ FLAGS    = -Wall -std=c++11 -g
 CPPFLAGS = -c
 LDFLAGS  =
 LIBS     = -lm -lstdc++
-CC  = g++
+CXX  = g++
 LD  = gcc
 EXE =
 OBJ = .o
 
-../obj/%$(OBJ) : %.cpp
-	$(CC) $(FLAGS) $(CPPFLAGS) -o $@ $<
+ifeq ($(shell test -d ~/x-tools && echo yes),yes)
+CXX = $(RPICXX)
+LD = $(RPICC)
+endif
 
 BASEOBJECTS = ../obj/utils$(OBJ) ../obj/expr$(OBJ) ../obj/Inst$(OBJ) ../obj/Eval$(OBJ) ../obj/Validator$(OBJ)
 ASMOBJECTS  = $(BASEOBJECTS) ../obj/Parser$(OBJ) ../obj/vc4asm$(OBJ)
 DISOBJECTS  = $(BASEOBJECTS) ../obj/Disassembler$(OBJ) ../obj/vc4dis$(OBJ)
 
-all: ../bin/vc4asm$(EXE) ../bin/vc4dis$(EXE)
+all: ../obj ../bin/vc4asm$(EXE) ../bin/vc4dis$(EXE)
 
 clean:
 	-rm ../bin/* ../obj/*
@@ -24,6 +26,12 @@ clean:
 
 ../bin/vc4dis$(EXE) : $(DISOBJECTS)
 	$(LD) $(FLAGS) $(LDFLAGS) -o $@ $(DISOBJECTS) $(LIBS)
+
+../obj/%$(OBJ) : %.cpp
+	$(CXX) $(FLAGS) $(CPPFLAGS) -o $@ $<
+
+../obj :
+	mkdir $@
 
 %.cpp : %.h
 expr.cpp : expr.h utils.h
