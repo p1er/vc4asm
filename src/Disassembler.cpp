@@ -8,6 +8,7 @@
 #include "Disassembler.h"
 #include "utils.h"
 
+#include <cstdlib>
 #include <cstdarg>
 #include <cstring>
 
@@ -15,7 +16,7 @@
 
 
 void Disassembler::append(const char* str)
-{	int len = strlen(str);
+{	long len = strlen(str);
 	memcpy(CodeAt, str, min(Code + sizeof Code - CodeAt, len));
 	CodeAt += len;
 }
